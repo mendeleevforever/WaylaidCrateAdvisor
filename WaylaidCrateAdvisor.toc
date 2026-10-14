@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Waylaid Crate Advisor
+## Notes: Fill-cost calculator for Waylaid Crates using Auctionator prices
+## Author: You
+## Version: 3.2.2
+## OptionalDeps: Auctionator
+
+WaylaidCrateAdvisor.lua
