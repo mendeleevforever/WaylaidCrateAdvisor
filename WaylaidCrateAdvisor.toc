@@ -2,7 +2,7 @@
 ## Title: Waylaid Crate Advisor
 ## Notes: Fill-cost calculator for Waylaid Crates using Auctionator prices
 ## Author: You
-## Version: 3.2.2
+## Version: 4.0.0
 ## OptionalDeps: Auctionator
 
 WaylaidCrateAdvisor.lua

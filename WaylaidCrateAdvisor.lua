@@ -179,14 +179,14 @@ end
 -- MONEY FORMATTING
 -- ============================================================
 function WCA:Coins(copper)
-    if not copper then return "|cffaaaaaa—|r" end
+    if not copper then return "|cff7d705a—|r" end
     local g = math.floor(copper / 10000)
     local s = math.floor((copper % 10000) / 100)
     local c = copper % 100
     local parts = {}
-    if g > 0 then parts[#parts+1] = ("|cffffd700%dg|r"):format(g) end
-    if s > 0 then parts[#parts+1] = ("|cffc0c0c0%ds|r"):format(s) end
-    if c > 0 or #parts == 0 then parts[#parts+1] = ("|cffb87333%dc|r"):format(c) end
+    if g > 0 then parts[#parts+1] = g .. "|TInterface\\MoneyFrame\\UI-GoldIcon:0:0:2:0|t" end
+    if s > 0 then parts[#parts+1] = s .. "|TInterface\\MoneyFrame\\UI-SilverIcon:0:0:2:0|t" end
+    if c > 0 or #parts == 0 then parts[#parts+1] = c .. "|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:2:0|t" end
     return table.concat(parts, " ")
 end
 
@@ -236,288 +236,389 @@ local function AddCrateTooltip(tooltip)
 end
 
 -- ============================================================
--- GUI — WoW Classic parchment style
+-- GUI — dark leather window with gold trim
 -- ============================================================
 
 local MainFrame
-local ROW_FRAMES = {}
+local ROW_POOL     = {}   -- recycled data rows
+local SECTION_POOL = {}   -- recycled tier headers
 
-local TIER_SECTIONS = {
-    {tier="Apprentice", label="Apprentice  (Level 10)"},
-    {tier="Journeyman", label="Journeyman  (Level 10)"},
-    {tier="Expert",     label="Expert  (Level 20)"},
-    {tier="Artisan",    label="Artisan  (Level 35)"},
+local WINDOW_W, WINDOW_H = 880, 640
+local ROW_H, SECTION_H   = 18, 26
+local SCROLL_LEFT        = 20     -- scroll area inset from the window's left edge
+local CHILD_W            = 810    -- width of the scrolling content
+
+-- Palette (r, g, b)
+local C = {
+    bg        = { 0.118, 0.082, 0.051 },
+    gold      = { 0.541, 0.416, 0.173 },
+    goldLight = { 0.722, 0.569, 0.235 },
+    outline   = { 0.169, 0.118, 0.055 },
+    inner     = { 0.290, 0.212, 0.094 },
+    rule      = { 0.420, 0.314, 0.137 },
+    header    = { 0.831, 0.627, 0.090 },
+    text      = { 0.902, 0.839, 0.682 },
+    money     = { 0.937, 0.894, 0.784 },
+    muted     = { 0.612, 0.553, 0.439 },
+    mf        = { 0.788, 0.725, 0.561 },
+    cpm       = { 1.000, 0.957, 0.816 },
 }
 
--- Column x positions (left edge of each column within the scroll child)
--- Frame is 760px wide; scroll child usable width ~700px after borders+scrollbar
-local COL = { subtier=10, item=155, cost=355, sell=450, totalcost=535, costpermf=625 }
-local COL_W = { subtier=143, item=198, cost=93, sell=83, totalcost=88, costpermf=90 }
+local TIER_INFO = {
+    Apprentice = { color = { 0.118, 1.000, 0.000 }, level = "Level 10" },
+    Journeyman = { color = { 0.290, 0.639, 1.000 }, level = "Level 10" },
+    Expert     = { color = { 0.761, 0.482, 1.000 }, level = "Level 20" },
+    Artisan    = { color = { 1.000, 0.604, 0.180 }, level = "Level 35" },
+}
 
-local function MakeClassicFrame()
+-- Column layout inside the scroll child: x = left edge, w = width
+local COLS = {
+    rank   = { x = 6,   w = 18  },
+    crate  = { x = 30,  w = 124 },
+    item   = { x = 160, w = 200 },
+    fill   = { x = 366, w = 84,  right = true },
+    ah     = { x = 458, w = 80,  right = true },
+    total  = { x = 546, w = 88,  right = true },
+    mf     = { x = 642, w = 36,  right = true },
+    cpm    = { x = 686, w = 110, right = true },
+}
+
+-- Rank highlight: coin icon, row tint (r,g,b,a), label/value colour
+local RANK_STYLE = {
+    { icon = "Interface\\MoneyFrame\\UI-GoldIcon",   tint = { 1.00, 0.82, 0.00, 0.20 }, color = { 1.00, 0.82, 0.00 } },
+    { icon = "Interface\\MoneyFrame\\UI-SilverIcon", tint = { 0.78, 0.78, 0.84, 0.18 }, color = { 0.78, 0.78, 0.82 } },
+    { icon = "Interface\\MoneyFrame\\UI-CopperIcon", tint = { 0.77, 0.45, 0.23, 0.24 }, color = { 0.77, 0.45, 0.23 } },
+}
+
+-- Draws a rectangular border of the given thickness, `inset` px inside the frame edge
+-- (negative inset draws outside it).
+local function AddBorder(frame, layer, rgb, alpha, thickness, inset)
+    local function edge()
+        local t = frame:CreateTexture(nil, layer)
+        t:SetColorTexture(rgb[1], rgb[2], rgb[3], alpha)
+        return t
+    end
+    local top, bottom, left, right = edge(), edge(), edge(), edge()
+    top:SetPoint("TOPLEFT", inset, -inset)
+    top:SetPoint("TOPRIGHT", -inset, -inset)
+    top:SetHeight(thickness)
+    bottom:SetPoint("BOTTOMLEFT", inset, inset)
+    bottom:SetPoint("BOTTOMRIGHT", -inset, inset)
+    bottom:SetHeight(thickness)
+    left:SetPoint("TOPLEFT", inset, -inset)
+    left:SetPoint("BOTTOMLEFT", inset, inset)
+    left:SetWidth(thickness)
+    right:SetPoint("TOPRIGHT", -inset, -inset)
+    right:SetPoint("BOTTOMRIGHT", -inset, inset)
+    right:SetWidth(thickness)
+end
+
+local function NewText(parent, font, col, xOffset, layer)
+    local fs = parent:CreateFontString(nil, layer or "OVERLAY", font or "GameFontNormalSmall")
+    fs:SetWidth(col.w)
+    fs:SetJustifyH(col.right and "RIGHT" or "LEFT")
+    fs:SetWordWrap(false)
+    fs.colX = col.x + (xOffset or 0)
+    return fs
+end
+
+local function MakeMainFrame()
     if MainFrame then return MainFrame end
 
     local f = CreateFrame("Frame", "WCAMainFrame", UIParent)
-    f:SetSize(760, 460)
+    f:SetSize(WINDOW_W, WINDOW_H)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
     f:EnableMouse(true)
+    f:SetClampedToScreen(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop",  f.StopMovingOrSizing)
+    f:Hide()
+    tinsert(UISpecialFrames, "WCAMainFrame")   -- Escape closes the window
 
-    -- Background: tiled parchment texture
+    -- Solid background (opaque, so the world doesn't show through)
     local bg = f:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Background")
-    bg:SetPoint("TOPLEFT",     12,  -12)
-    bg:SetPoint("BOTTOMRIGHT", -12,  12)
-    bg:SetVertexColor(1, 0.88, 0.65, 1)  -- warm parchment tint
+    bg:SetColorTexture(C.bg[1], C.bg[2], C.bg[3], 0.97)
+    bg:SetAllPoints()
 
-    -- Border: nine separate textures (top-left, top, top-right, left, right, bot-left, bot, bot-right)
-    local function AddBorderPiece(layer, point, relPoint, xOff, yOff, w, h, texCoord)
-        local t = f:CreateTexture(nil, layer)
-        t:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Border")
-        t:SetSize(w, h)
-        t:SetPoint(point, f, relPoint, xOff, yOff)
-        if texCoord then t:SetTexCoord(unpack(texCoord)) end
-        return t
+    -- Layered trim: dark outline, gold band, faint inner line
+    AddBorder(f, "BORDER",  C.outline, 1,   2, -2)
+    AddBorder(f, "BORDER",  C.gold,    1,   3,  0)
+    AddBorder(f, "ARTWORK", C.inner,   1,   1,  3)
+
+    -- Title plate overlapping the top edge
+    local plate = CreateFrame("Frame", nil, f)
+    plate:SetSize(300, 34)
+    plate:SetPoint("TOP", 0, 18)
+    plate:SetFrameLevel(f:GetFrameLevel() + 5)
+    local pbg = plate:CreateTexture(nil, "BACKGROUND")
+    pbg:SetColorTexture(0.165, 0.114, 0.063, 1)
+    pbg:SetAllPoints()
+    AddBorder(plate, "BORDER", C.outline,   1, 2, -2)
+    AddBorder(plate, "BORDER", C.goldLight, 1, 2,  0)
+    local title = plate:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("CENTER", 0, 0)
+    title:SetText("Waylaid Crate Advisor")
+    title:SetTextColor(1, 0.82, 0)
+
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -4, -4)
+    close:SetScript("OnClick", function() f:Hide() end)
+
+    -- Fixed column headers (they don't scroll away)
+    local headerY = -40
+    local headers = {
+        { "crate", "Crate" }, { "item", "Cheapest fill" }, { "fill", "Fill cost" },
+        { "ah", "Crate AH" }, { "total", "Total cost" }, { "mf", "MF" }, { "cpm", "Cost / MF" },
+    }
+    for _, h in ipairs(headers) do
+        local col = COLS[h[1]]
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("TOPLEFT", SCROLL_LEFT + col.x, headerY)
+        fs:SetWidth(col.w)
+        fs:SetJustifyH(col.right and "RIGHT" or "LEFT")
+        fs:SetText(h[2])
+        if h[1] == "cpm" then
+            fs:SetTextColor(1, 0.82, 0)
+        else
+            fs:SetTextColor(C.header[1], C.header[2], C.header[3])
+        end
     end
-    -- corners (64x64 regions of the border sheet)
-    --AddBorderPiece("OVERLAY","TOPLEFT",    "TOPLEFT",     0,  0, 64,64, {0,   0.25, 0,    0.25})
-    --AddBorderPiece("OVERLAY","TOPRIGHT",   "TOPRIGHT",    0,  0, 64,64, {0.75,1,    0,    0.25})
-    --AddBorderPiece("OVERLAY","BOTTOMLEFT", "BOTTOMLEFT",  0,  0, 64,64, {0,   0.25, 0.75, 1   })
-    --AddBorderPiece("OVERLAY","BOTTOMRIGHT","BOTTOMRIGHT",  0,  0, 64,64, {0.75,1,    0.75, 1   })
+    local headRule = f:CreateTexture(nil, "ARTWORK")
+    headRule:SetColorTexture(C.rule[1], C.rule[2], C.rule[3], 1)
+    headRule:SetPoint("TOPLEFT", SCROLL_LEFT, headerY - 18)
+    headRule:SetPoint("TOPRIGHT", -20, headerY - 18)
+    headRule:SetHeight(1)
 
-    -- Title bar texture strip
-    local titleBg = f:CreateTexture(nil, "ARTWORK")
-    titleBg:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
-    titleBg:SetPoint("TOP", 0, 12)
-    titleBg:SetSize(400, 64)
-
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -2)
-    title:SetText("|cffffd100Waylaid Crate Advisor|r")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -3, -3)
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
-
-    -- Refresh button  
-    local refreshBtn = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
-    refreshBtn:SetSize(90, 22)
-    refreshBtn:SetPoint("BOTTOMRIGHT", -16, 14)
-    refreshBtn:SetText("Refresh")
-    refreshBtn:SetScript("OnClick", function() WCA:RebuildRows() end)
-
-    -- Scroll frame
+    -- Scrolling body; right inset leaves room for the scrollbar inside the trim
     local scroll = CreateFrame("ScrollFrame", "WCAScrollFrame", f, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT",     14, -42)
-    scroll:SetPoint("BOTTOMRIGHT", -32, 40)
+    scroll:SetPoint("TOPLEFT", SCROLL_LEFT, headerY - 22)
+    scroll:SetPoint("BOTTOMRIGHT", -40, 56)
 
     local child = CreateFrame("Frame", nil, scroll)
-    child:SetSize(scroll:GetWidth(), 10)
+    child:SetSize(CHILD_W, 10)
     scroll:SetScrollChild(child)
 
-    -- Column headers
-    local headerY = -4
-    local function Header(text, x, w)
-        local fs = child:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", x, headerY)
-        fs:SetWidth(w)
-        fs:SetJustifyH("CENTER")
-        fs:SetText("|cffd4a017"..text.."|r")
-    end
-    Header("Crate",         COL.subtier, COL_W.subtier)
-    Header("Cheapest fill item", COL.item,     COL_W.item)
-    Header("Fill cost",     COL.cost,     COL_W.cost)
-    Header("Crate price",      COL.sell,     COL_W.sell)
-    Header("Total cost",    COL.totalcost, COL_W.totalcost)
-    Header("Cost/MF",       COL.costpermf, COL_W.costpermf)
+    -- Footer: rule, legend, Refresh button
+    local footRule = f:CreateTexture(nil, "ARTWORK")
+    footRule:SetColorTexture(C.rule[1], C.rule[2], C.rule[3], 1)
+    footRule:SetPoint("BOTTOMLEFT", SCROLL_LEFT, 48)
+    footRule:SetPoint("BOTTOMRIGHT", -20, 48)
+    footRule:SetHeight(1)
 
-    -- Thin divider under headers
-    local div = child:CreateTexture(nil, "OVERLAY")
-    div:SetColorTexture(0.5, 0.38, 0.15, 0.6)
-    div:SetPoint("TOPLEFT",  0, headerY - 14)
-    div:SetPoint("TOPRIGHT", 0, headerY - 14)
-    div:SetHeight(1)
+    local legend = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    legend:SetPoint("BOTTOMLEFT", SCROLL_LEFT + 4, 20)
+    legend:SetJustifyH("LEFT")
+    legend:SetTextColor(0.72, 0.65, 0.52)
+    legend:SetText(
+        "|TInterface\\MoneyFrame\\UI-GoldIcon:12:12|t |TInterface\\MoneyFrame\\UI-SilverIcon:12:12|t " ..
+        "|TInterface\\MoneyFrame\\UI-CopperIcon:12:12|t  Cheapest Cost / MF" ..
+        "      |cff9c8d70EST|r = no crate AH price, fill cost only" ..
+        "      Prices from Auctionator"
+    )
 
-    f.scroll  = scroll
-    f.child   = child
-    f.baseY   = headerY - 18  -- content starts below header+divider
+    local refresh = CreateFrame("Button", nil, f, "GameMenuButtonTemplate")
+    refresh:SetSize(110, 26)
+    refresh:SetPoint("BOTTOMRIGHT", -20, 14)
+    refresh:SetText("Refresh")
+    refresh:SetScript("OnClick", function() WCA:RebuildRows() end)
+
+    f.scroll = scroll
+    f.child  = child
     MainFrame = f
     return f
 end
 
--- Creates or recycles a single data row
 local function GetRow(child, idx)
-    if ROW_FRAMES[idx] then return ROW_FRAMES[idx] end
+    if ROW_POOL[idx] then return ROW_POOL[idx] end
     local row = {}
 
-    local function FS(anchor, x, w, justify)
-        local fs = child:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", x, 0)   -- y set by caller via :SetPoint
-        fs:SetWidth(w)
-        fs:SetJustifyH(justify or "LEFT")
-        return fs
-    end
-
-    row.subtier   = FS(child, COL.subtier,  COL_W.subtier)
-    row.item      = FS(child, COL.item,     COL_W.item)
-    row.cost      = FS(child, COL.cost,     COL_W.cost,     "RIGHT")
-    row.sell      = FS(child, COL.sell,     COL_W.sell,     "RIGHT")
-    row.totalcost = FS(child, COL.totalcost,COL_W.totalcost,"RIGHT")
-    row.costpermf = FS(child, COL.costpermf,COL_W.costpermf,"RIGHT")
-
-    -- zebra stripe background
     row.bg = child:CreateTexture(nil, "BACKGROUND")
-    row.bg:SetColorTexture(0, 0, 0, 0)  -- default transparent; set per-row
+    row.bg:SetHeight(ROW_H)
 
-    ROW_FRAMES[idx] = row
+    row.medal = child:CreateTexture(nil, "ARTWORK")
+    row.medal:SetSize(14, 14)
+
+    row.crate = NewText(child, "GameFontNormalSmall", COLS.crate)
+    row.item  = NewText(child, "GameFontNormalSmall", COLS.item)
+    row.fill  = NewText(child, "GameFontNormalSmall", COLS.fill)
+    row.ah    = NewText(child, "GameFontNormalSmall", COLS.ah)
+    row.total = NewText(child, "GameFontNormalSmall", COLS.total)
+    row.mf    = NewText(child, "GameFontNormalSmall", COLS.mf)
+    row.cpm   = NewText(child, "GameFontNormal",      COLS.cpm)
+
+    row.texts = { row.crate, row.item, row.fill, row.ah, row.total, row.mf, row.cpm }
+    ROW_POOL[idx] = row
     return row
 end
 
-function WCA:RebuildRows()
-    local f = MakeClassicFrame()
-    local child = f.child
+local function GetSection(child, idx)
+    if SECTION_POOL[idx] then return SECTION_POOL[idx] end
+    local sec = {}
+    sec.label = child:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    sec.label:SetJustifyH("LEFT")
+    sec.rule = child:CreateTexture(nil, "ARTWORK")
+    sec.rule:SetHeight(1)
+    SECTION_POOL[idx] = sec
+    return sec
+end
 
-    -- Hide all existing rows
-    for _, row in ipairs(ROW_FRAMES) do
-        for k, fs in pairs(row) do
-            if k ~= "bg" and fs.SetText then fs:SetText("") end
-        end
-        row.bg:SetColorTexture(0,0,0,0)
+local function PlaceRow(row, y)
+    row.bg:ClearAllPoints()
+    row.bg:SetPoint("TOPLEFT", 0, y)
+    row.bg:SetPoint("TOPRIGHT", 0, y)
+    row.medal:ClearAllPoints()
+    row.medal:SetPoint("TOPLEFT", COLS.rank.x, y - 2)
+    for _, fs in ipairs(row.texts) do
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", fs.colX, y - 3)
     end
+end
 
-    local LH      = 16   -- row height
-    local SECT_H  = 20   -- section header height
-    local y        = f.baseY
-    local rowIdx   = 0
+local function ShowRow(row, show)
+    if show then row.bg:Show() else row.bg:Hide(); row.medal:Hide() end
+    for _, fs in ipairs(row.texts) do
+        if show then fs:Show() else fs:Hide() end
+    end
+end
 
-    local currentTier = nil
+-- Returns crateID -> rank (1..3) for the three lowest Cost/MF crates.
+-- Only crates with BOTH a fill price and a crate AH price are ranked,
+-- so fill-only (EST) figures can't win by being incomplete.
+function WCA:RankCheapestCostPerMF()
+    local list = {}
+    for _, crateID in ipairs(self.CRATE_ORDER) do
+        local best       = self:CheapestFill(crateID)
+        local cratePrice = self:GetCratePrice(crateID)
+        local mf         = self:GetMerchantsFavour(crateID)
+        if best and cratePrice and cratePrice > 0 and mf and mf > 0 then
+            list[#list + 1] = { id = crateID, cpm = (cratePrice + best.totalCost) / mf }
+        end
+    end
+    table.sort(list, function(a, b) return a.cpm < b.cpm end)
+    local ranks = {}
+    for i = 1, math.min(3, #list) do ranks[list[i].id] = i end
+    return ranks
+end
+
+function WCA:RebuildRows()
+    local f     = MakeMainFrame()
+    local child = f.child
+    local ranks = self:RankCheapestCostPerMF()
+
+    local y, rowIdx, secIdx = -4, 0, 0
+    local currentTier
 
     for _, crateID in ipairs(self.CRATE_ORDER) do
         local data = self.CRATES[crateID]
         if data then
+            -- Tier header
+            if data.tier ~= currentTier then
+                currentTier = data.tier
+                secIdx = secIdx + 1
+                local sec  = GetSection(child, secIdx)
+                local info = TIER_INFO[data.tier] or { color = { 1, 1, 1 }, level = "" }
+                local hex  = ("%02x%02x%02x"):format(info.color[1] * 255, info.color[2] * 255, info.color[3] * 255)
 
-        -- Section divider when tier changes
-        if data.tier ~= currentTier then
-            currentTier = data.tier
-
-            -- Find the label for this tier
-            local label = data.tier
-            for _, sec in ipairs(TIER_SECTIONS) do
-                if sec.tier == data.tier then label = sec.label break end
+                y = y - 6
+                sec.label:ClearAllPoints()
+                sec.label:SetPoint("TOPLEFT", COLS.rank.x, y)
+                sec.label:SetText(("|cff%s%s|r   |cffa8987a%s|r"):format(hex, data.tier, info.level))
+                sec.label:Show()
+                sec.rule:ClearAllPoints()
+                sec.rule:SetPoint("TOPLEFT", 0, y - 16)
+                sec.rule:SetPoint("TOPRIGHT", 0, y - 16)
+                sec.rule:SetColorTexture(C.gold[1], C.gold[2], C.gold[3], 0.55)
+                sec.rule:Show()
+                y = y - (SECTION_H - 6)
             end
 
-            -- Section header font string
-            local tierCol = TIER_COLOR[data.tier] or "|r"
-            local secFS = child:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            secFS:SetPoint("TOPLEFT", COL.subtier, y)
-            secFS:SetWidth(530)
-            secFS:SetText(tierCol .. label .. "|r")
-            y = y - SECT_H
+            rowIdx = rowIdx + 1
+            local row = GetRow(child, rowIdx)
+            PlaceRow(row, y)
+            ShowRow(row, true)
 
-            -- Section underline
-            local ul = child:CreateTexture(nil, "OVERLAY")
-            ul:SetColorTexture(0.55, 0.40, 0.12, 0.5)
-            ul:SetPoint("TOPLEFT",  COL.subtier, y + 2)
-            ul:SetPoint("TOPRIGHT", -4,           y + 2)
-            ul:SetHeight(1)
-            y = y - 4
-        end
+            local rank  = ranks[crateID]
+            local style = rank and RANK_STYLE[rank]
 
-        rowIdx = rowIdx + 1
-        local row = GetRow(child, rowIdx)
-
-        -- Reposition all fields for this row
-        for _, fs in pairs(row) do
-            if fs.SetPoint then fs:ClearAllPoints() end
-        end
-        row.bg:ClearAllPoints()
-
-        -- Zebra stripe
-        if rowIdx % 2 == 0 then
-            row.bg:SetColorTexture(0.2, 0.15, 0.05, 0.18)
-        else
-            row.bg:SetColorTexture(0, 0, 0, 0)
-        end
-        row.bg:SetPoint("TOPLEFT",  0,    y)
-        row.bg:SetPoint("TOPRIGHT", 0,    y)
-        row.bg:SetHeight(LH)
-
-        -- Subtier label
-        row.subtier:SetPoint("TOPLEFT", COL.subtier, y)
-        row.subtier:SetText(data.subtier)
-        row.subtier:SetTextColor(0.9, 0.82, 0.6)
-
-        -- Cheapest fill
-        local best = self:CheapestFill(crateID)
-        if best then
-            row.item:SetPoint("TOPLEFT", COL.item, y)
-            row.item:SetText(("|cffFFFFFF x%d|r %s"):format(best.qty, best.name))
-
-            row.cost:SetPoint("TOPLEFT", COL.cost, y)
-            row.cost:SetText(self:Coins(best.totalCost))
-
-            local cratePrice = self:GetCratePrice(crateID)
-            local mf = self:GetMerchantsFavour(crateID)
-
-            if cratePrice and cratePrice > 0 then
-                row.sell:SetPoint("TOPLEFT", COL.sell, y)
-                row.sell:SetText(self:Coins(cratePrice))
-
-                local totalCost = cratePrice + best.totalCost
-                row.totalcost:SetPoint("TOPLEFT", COL.totalcost, y)
-                row.totalcost:SetText(self:Coins(totalCost))
-
-                if mf and mf > 0 then
-                    row.costpermf:SetPoint("TOPLEFT", COL.costpermf, y)
-                    row.costpermf:SetText(self:Coins(math.floor(totalCost / mf)))
+            -- Background: rank tint, else zebra stripe
+            if style then
+                row.bg:SetColorTexture(style.tint[1], style.tint[2], style.tint[3], style.tint[4])
+                row.medal:SetTexture(style.icon)
+                row.medal:Show()
+            else
+                if rowIdx % 2 == 0 then
+                    row.bg:SetColorTexture(0.353, 0.263, 0.125, 0.22)
                 else
-                    row.costpermf:SetPoint("TOPLEFT", COL.costpermf, y)
-                    row.costpermf:SetText("|cff888888—|r")
+                    row.bg:SetColorTexture(0, 0, 0, 0)
+                end
+                row.medal:Hide()
+            end
+
+            -- Crate name
+            if style then
+                row.crate:SetText(("%d. %s"):format(rank, data.subtier))
+                row.crate:SetTextColor(style.color[1], style.color[2], style.color[3])
+            else
+                row.crate:SetText(data.subtier)
+                row.crate:SetTextColor(C.text[1], C.text[2], C.text[3])
+            end
+
+            local mf         = self:GetMerchantsFavour(crateID)
+            local best       = self:CheapestFill(crateID)
+            local cratePrice = self:GetCratePrice(crateID)
+            local hasAH      = cratePrice and cratePrice > 0
+
+            row.mf:SetText(mf and tostring(mf) or "")
+            row.mf:SetTextColor(C.mf[1], C.mf[2], C.mf[3])
+
+            for _, fs in ipairs({ row.fill, row.ah, row.total }) do
+                fs:SetTextColor(C.money[1], C.money[2], C.money[3])
+            end
+
+            if best then
+                row.item:SetText(("|cffffffffx%d|r |cffffd100%s|r"):format(best.qty, best.name))
+                row.fill:SetText(self:Coins(best.totalCost))
+
+                if hasAH then
+                    local total = cratePrice + best.totalCost
+                    row.ah:SetText(self:Coins(cratePrice))
+                    row.total:SetText(self:Coins(total))
+                    row.cpm:SetText(mf and mf > 0 and self:Coins(math.floor(total / mf)) or "")
+                    if style then
+                        row.cpm:SetTextColor(style.color[1], style.color[2], style.color[3])
+                    else
+                        row.cpm:SetTextColor(C.cpm[1], C.cpm[2], C.cpm[3])
+                    end
+                else
+                    row.ah:SetText("|cff7d705a—|r")
+                    row.total:SetText("|cff7d705a—|r")
+                    row.cpm:SetText(mf and mf > 0
+                        and ("|cff9c8d70EST|r  " .. self:Coins(math.floor(best.totalCost / mf))) or "")
+                    row.cpm:SetTextColor(C.muted[1], C.muted[2], C.muted[3])
                 end
             else
-                row.sell:SetPoint("TOPLEFT", COL.sell, y)
-                row.sell:SetText("|cff888888—|r")
-                row.totalcost:SetPoint("TOPLEFT", COL.totalcost, y)
-                row.totalcost:SetText("|cff888888—|r")
-                -- Can still show cost/mf using fill cost alone if no crate price
-                if mf and mf > 0 then
-                    row.costpermf:SetPoint("TOPLEFT", COL.costpermf, y)
-                    row.costpermf:SetText(self:Coins(math.floor(best.totalCost / mf)).."*")
-                else
-                    row.costpermf:SetPoint("TOPLEFT", COL.costpermf, y)
-                    row.costpermf:SetText("|cff888888—|r")
-                end
+                row.item:SetText("|cff8a7c62No price data|r")
+                row.fill:SetText("")
+                row.ah:SetText("")
+                row.total:SetText("")
+                row.cpm:SetText("")
             end
-        else
-            row.item:SetPoint("TOPLEFT", COL.item, y)
-            row.item:SetText("|cff888888No price data|r")
-            row.cost:SetPoint("TOPLEFT", COL.cost, y)
-            row.cost:SetText("")
-            row.sell:SetPoint("TOPLEFT", COL.sell, y)
-            row.sell:SetText("")
-            row.totalcost:SetPoint("TOPLEFT", COL.totalcost, y)
-            row.totalcost:SetText("")
-            row.costpermf:SetPoint("TOPLEFT", COL.costpermf, y)
-            row.costpermf:SetText("")
-        end
 
-        y = y - LH
-        end -- if data
+            y = y - ROW_H
+        end
     end
 
-    -- Footer note
-    local footerFS = child:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    footerFS:SetPoint("TOPLEFT", COL.subtier, y - 4)
-    footerFS:SetWidth(530)
-    footerFS:SetText("|cff888888Prices from Auctionator  •  cheapest fill shown  •  * = fill cost only (no crate AH price)  •  /wca to refresh|r")
-    y = y - 20
+    -- Hide anything left over from a previous, longer build
+    for i = rowIdx + 1, #ROW_POOL do ShowRow(ROW_POOL[i], false) end
+    for i = secIdx + 1, #SECTION_POOL do
+        SECTION_POOL[i].label:Hide()
+        SECTION_POOL[i].rule:Hide()
+    end
 
-    child:SetSize(f.scroll:GetWidth(), math.abs(y) + 10)
+    child:SetSize(CHILD_W, math.abs(y) + 8)
     f:Show()
 end
 
@@ -638,6 +739,6 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
     if not ok then
         print("|cffff0000WaylaidCrateAdvisor load error:|r " .. tostring(err))
     else
-        print("|cff00ff96WaylaidCrateAdvisor 3.2.2|r loaded  —  /wca to open, /wca help for options")
+        print("|cff00ff96WaylaidCrateAdvisor 4.0|r loaded  —  /wca to open, /wca help for options")
     end
 end)
