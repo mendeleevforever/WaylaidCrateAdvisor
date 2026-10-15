@@ -8,6 +8,8 @@ Calculates the Auctionator-based fill cost for every WoW Forever Waylaid Crate, 
 - **Bag summary** — `/crates` opens a window listing every crate in your bags with individual and grand totals
 - `/crates id` — hover an item and run this to print its item ID (useful for updating crate IDs)
 
+<img width="1108" height="824" alt="WaylaidCrateAdvisor screenshot" src="https://github.com/user-attachments/assets/63b0f302-ffd8-4620-b9c0-adbf20379cab" />
+
 ## Supported crates
 
 | Tier        | Subtiers |
